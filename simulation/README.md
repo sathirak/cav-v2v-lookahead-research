@@ -40,4 +40,4 @@ Or:
 python -m simulation.visualizer
 ```
 
-Requires `pygame` (see requirements.txt).
+Requires `matplotlib` (see requirements.txt).

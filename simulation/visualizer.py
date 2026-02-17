@@ -1,373 +1,183 @@
-"""
-Pygame-based visualization for the road simulation.
-
-Run from project root: python run_visualizer.py [scenario] [--hide-humans]
-"""
-
-from typing import Optional
-
 import pygame
-
-from simulation.scenario import get_scenario, list_scenarios, DEFAULT_SCENARIO
-from simulation.objects import HumanVehicle
-
-
-# ---------------------------------------------------------------------------
-# Configuration
-# ---------------------------------------------------------------------------
-SCALE = 2  # Supersampling factor (render at 2x, scale down)
-FPS = 60
-WINDOW_W, WINDOW_H = 1200, 400
-RENDER_W, RENDER_H = WINDOW_W * SCALE, WINDOW_H * SCALE
-
-# Minimalist Palette
-COLORS = {
-    "bg": (250, 250, 250),  # White/Clean
-    "grid": (240, 240, 240),  # Very subtle grid
-    "road": (80, 80, 80),  # Dark gray asphalt
-    "markings_white": (255, 255, 255),
-    "markings_yellow": (255, 215, 0),
-    "shadow": (0, 0, 0, 30),  # Soft shadow alpha
-    "text": (50, 50, 50),
-    "ui_bg": (255, 255, 255, 220),  # Translucent white
-    "cars": [
-        (230, 80, 80),  # Red
-        (80, 160, 220),  # Blue
-        (240, 170, 60),  # Orange
-        (80, 190, 130),  # Green
-        (160, 100, 180),  # Purple
-    ],
-    "collision": (230, 60, 60, 200),
-}
-
-# ---------------------------------------------------------------------------
-# Drawing helpers
-# ---------------------------------------------------------------------------
+import scenario
+import config
+from simulation.context import ScenarioContext
 
 
-def _draw_rounded_rect(surface: pygame.Surface, rect: tuple, color: tuple, radius: float = 0.4) -> None:
-    """Draw a filled rounded rectangle. rect: (x, y, w, h); radius: 0–1 relative to half height."""
-    rect = pygame.Rect(rect)
-    color = pygame.Color(*color[:3])
-    pos = rect.topleft
-
-    # Calculate pixel radius
-    r = int(min(rect.w, rect.h) * radius / 2)
-
-    # Draw rounded shape
-    x, y = pos
-    w, h = rect.size
-
-    # Clamp radius
-    r = max(0, min(r, w // 2, h // 2))
-
-    if r < 2:
-        pygame.draw.rect(surface, color, rect)
-        return
-
-    # Corners
-    pygame.draw.circle(surface, color, (x + r, y + r), r)
-    pygame.draw.circle(surface, color, (x + w - r, y + r), r)
-    pygame.draw.circle(surface, color, (x + r, y + h - r), r)
-    pygame.draw.circle(surface, color, (x + w - r, y + h - r), r)
-
-    # Fillers
-    pygame.draw.rect(surface, color, (x + r, y, w - 2 * r, h))
-    pygame.draw.rect(surface, color, (x, y + r, w, h - 2 * r))
+def road_geometry(surface, road_length, num_lanes):
+    width = surface.get_width()
+    height = surface.get_height()
+    scale = config.PIXELS_PER_UNIT
+    lane_w = config.LANE_WIDTH_UNITS
+    road_length_px = road_length * scale
+    road_height_px = num_lanes * lane_w * scale
+    road_left = (width - road_length_px) // 2
+    road_top = (height - road_height_px) // 2
+    lane_h_px = lane_w * scale
+    return road_left, road_top, road_length_px, road_height_px, lane_h_px, scale
 
 
-def _draw_car_sprite(
-    surface: pygame.Surface, x: float, y: float, w: float, h: float, color: tuple, car_id: int
-) -> None:
-    """Draw a car body with roof highlight."""
-    _draw_rounded_rect(surface, (x, y, w, h), color, 0.4)
+def draw_road(
+    surface, road_left, road_top, road_length_px, road_height_px, lane_h_px, num_lanes
+):
+    road_rect = pygame.Rect(road_left, road_top, road_length_px, road_height_px)
+    pygame.draw.rect(surface, config.ROAD_COLOR, road_rect)
 
-    # Roof highlight
-    roof_w = w * 0.5
-    roof_h = h * 0.7
-    roof_x = x + (w - roof_w) / 2
-    roof_y = y + (h - roof_h) / 2
+    if num_lanes >= 2:
+        center_y = road_top + road_height_px // 2
+        x = road_left
+        while x < road_left + road_length_px:
+            seg_end = min(x + 24, road_left + road_length_px)
+            pygame.draw.line(
+                surface,
+                config.CENTER_LINE_COLOR,
+                (x, center_y),
+                (seg_end, center_y),
+                width=3,
+            )
+            x += 40
 
-    # Highlight
-    highlight = [min(c + 30, 255) for c in color[:3]]
-    _draw_rounded_rect(surface, (roof_x, roof_y, roof_w, roof_h), highlight, 0.3)
+    for i in range(1, num_lanes):
+        y = road_top + i * lane_h_px
+        pygame.draw.line(
+            surface,
+            config.LANE_LINE_COLOR,
+            (road_left, y),
+            (road_left + road_length_px, y),
+            width=3,
+        )
+
+    pygame.draw.line(
+        surface,
+        config.LANE_LINE_COLOR,
+        (road_left, road_top),
+        (road_left, road_top + road_height_px),
+        width=2,
+    )
+    pygame.draw.line(
+        surface,
+        config.LANE_LINE_COLOR,
+        (road_left + road_length_px, road_top),
+        (road_left + road_length_px, road_top + road_height_px),
+        width=2,
+    )
 
 
-def run_visualizer(
-    scenario_name: Optional[str] = None,
-    show_human_cars: bool = True,
-    dt: float = 0.05,
-    fps: int = 60,
-) -> None:
-    """Run the visualizer loop. If show_human_cars is False, human vehicles are not drawn (sim still runs)."""
-    if scenario_name is None:
-        scenario_name = DEFAULT_SCENARIO
-    scenario = get_scenario(scenario_name)
-    if scenario is None:
-        print("Unknown scenario: %r" % scenario_name)
-        print("Available:", ", ".join(list_scenarios()))
-        return
-    make_simulation, update_controls = scenario
-
-    sim = make_simulation()
-    road_length = sim.road.length
-
-    pygame.init()
+def draw_labels(surface, road_left, road_top, road_length_px, road_height_px):
     try:
-        pygame.display.gl_set_attribute(pygame.GL_MULTISAMPLEBUFFERS, 1)
-        pygame.display.gl_set_attribute(pygame.GL_MULTISAMPLESAMPLES, 4)
+        font = pygame.font.Font(None, 36)
     except Exception:
-        pass
+        font = pygame.font.SysFont("Arial", 24)
+    a_text = font.render("Point A", True, config.LABEL_COLOR)
+    b_text = font.render("Point B", True, config.LABEL_COLOR)
+    a_rect = a_text.get_rect(centerx=road_left, top=road_top - 28)
+    b_rect = b_text.get_rect(centerx=road_left + road_length_px, top=road_top - 28)
+    surface.blit(a_text, a_rect)
+    surface.blit(b_text, b_rect)
 
-    window = pygame.display.set_mode((WINDOW_W, WINDOW_H), pygame.DOUBLEBUF)
-    pygame.display.set_caption("Simulation Visualization")
 
-    # Render surface (2x size)
-    canvas = pygame.Surface((RENDER_W, RENDER_H))
+def draw_cars(surface, cars, road_left, road_top, lane_h_px, scale):
+    car_w = config.CAR_LENGTH_UNITS * scale
+    car_h = lane_h_px * 0.7
+    for car in cars:
+        car_len_px = car.length * scale
+        x = road_left + car.position * scale - car_len_px / 2
+        y = road_top + car.lane * lane_h_px + (lane_h_px - car_h) / 2
+        color = (
+            config.CAR_COLORS[car.color]
+            if 0 <= car.color < len(config.CAR_COLORS)
+            else config.CAR_COLORS[0]
+        )
+        pygame.draw.rect(surface, color, (x, y, car_len_px, car_h))
 
+
+def draw_ui(surface, started, paused):
+    try:
+        font = pygame.font.Font(None, 28)
+    except Exception:
+        font = pygame.font.SysFont("Arial", 20)
+    if not started:
+        text = font.render("Press SPACE to start", True, config.LABEL_COLOR)
+    elif paused:
+        text = font.render(
+            "Paused — SPACE to resume | R to restart", True, config.LABEL_COLOR
+        )
+    else:
+        text = font.render(
+            "Running — SPACE to pause | R to restart", True, config.LABEL_COLOR
+        )
+    r = text.get_rect(bottomleft=(10, surface.get_height() - 8))
+    surface.blit(text, r)
+
+
+def run():
+    pygame.init()
+    screen = pygame.display.set_mode(
+        (config.WINDOW_WIDTH, config.WINDOW_HEIGHT), pygame.RESIZABLE
+    )
+    pygame.display.set_caption("Road Simulation — CAV V2V Lookahead")
     clock = pygame.time.Clock()
 
-    # Dimensions in RENDER space
-    margin_x = 50 * SCALE
-    margin_y = 50 * SCALE
+    def reset():
+        ctx = ScenarioContext()
+        scenario.reset()
+        return ctx, 0.0, []
 
-    # Proportional rendering: fit road to width, scaling everything else
-    road_w_px = RENDER_W - 2 * margin_x
-
-    # Fixed road height in meters? Or just visual height.
-    # Visual height is better fixed for visibility.
-    road_h_px = 120 * SCALE
-    lane_h_px = road_h_px / 2
-
-    road_top = (RENDER_H - road_h_px) // 2
-    road_bottom = road_top + road_h_px
-    road_center_y = road_top + lane_h_px
-    road_left = margin_x
-
-    # Pixels per meter
-    px_per_m = road_w_px / road_length
-
-    # Fonts
-    font_name = (
-        pygame.font.match_font("segoeui")
-        or pygame.font.match_font("helveticaneue")
-        or pygame.font.match_font("arial")
-    )
-    font_ui = (
-        pygame.font.Font(font_name, int(24 * SCALE))
-        if font_name
-        else pygame.font.SysFont(None, int(24 * SCALE))
-    )
-    font_label = (
-        pygame.font.Font(font_name, int(16 * SCALE))
-        if font_name
-        else pygame.font.SysFont(None, int(16 * SCALE))
-    )
-    font_alert = (
-        pygame.font.Font(font_name, int(60 * SCALE))
-        if font_name
-        else pygame.font.SysFont(None, int(60 * SCALE))
-    )
-
-    t = 0
-    running = True
-    collision_count = 0
+    sim_ctx, sim_time, active_cars = reset()
+    started = False
     paused = False
+    running = True
 
     while running:
-        # Event loop
+        dt = clock.tick(config.FPS) / 1000.0
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 running = False
-            elif event.type == pygame.KEYDOWN:
+            if event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_ESCAPE:
                     running = False
                 elif event.key == pygame.K_SPACE:
-                    paused = not paused
+                    if not started:
+                        started = True
+                        paused = False
+                    else:
+                        paused = not paused
                 elif event.key == pygame.K_r:
-                    # Restart
-                    sim = make_simulation()
-                    road_length = sim.road.length
-                    px_per_m = road_w_px / road_length
-                    t = 0
-                    collision_count = 0
+                    sim_ctx, sim_time, active_cars = reset()
+                    started = False
                     paused = False
 
-        # Step (only when not paused; collisions are resolved so cars stack)
-        if not paused:
-            update_controls(sim, t)
-            if sim.step(dt, t):
-                collision_count += 1
-            t += dt
+        sim_ctx._pending = []
+        scenario.setup(sim_ctx, sim_time)
+        if started and not paused:
+            for car in sim_ctx._pending:
+                if car not in active_cars:
+                    active_cars.append(car)
+            sim_time += dt
+            for car in active_cars:
+                car.update(dt, sim_ctx.road_length, active_cars)
+            active_cars = [c for c in active_cars if c.front < sim_ctx.road_length]
 
-        # --- Draw to Canvas (Supersampled) ---
-        canvas.fill(COLORS["bg"])
-
-        # Grid (Dots)
-        grid_spacing = 50 * SCALE
-        for x in range(0, RENDER_W, grid_spacing):
-            for y in range(0, RENDER_H, grid_spacing):
-                pygame.draw.circle(canvas, COLORS["grid"], (x, y), 2 * SCALE)
-
-        # Road Surface
-        pygame.draw.rect(
-            canvas, COLORS["road"], (road_left, road_top, road_w_px, road_h_px)
+        road_left, road_top, road_length_px, road_height_px, lane_h_px, scale = (
+            road_geometry(screen, sim_ctx.road_length, sim_ctx.num_lanes)
         )
-
-        # Lane Markings
-        # Edges (White)
-        pygame.draw.line(
-            canvas,
-            COLORS["markings_white"],
-            (road_left, road_top),
-            (road_left + road_w_px, road_top),
-            4 * SCALE,
+        screen.fill(config.BACKGROUND_COLOR)
+        draw_road(
+            screen,
+            road_left,
+            road_top,
+            road_length_px,
+            road_height_px,
+            lane_h_px,
+            sim_ctx.num_lanes,
         )
-        pygame.draw.line(
-            canvas,
-            COLORS["markings_white"],
-            (road_left, road_bottom),
-            (road_left + road_w_px, road_bottom),
-            4 * SCALE,
-        )
-
-        # Center Line (Dashed Yellow)
-        dash_len = 40 * SCALE
-        gap_len = 30 * SCALE
-        cx = road_left
-        while cx < road_left + road_w_px:
-            w = min(dash_len, road_left + road_w_px - cx)
-            if w > 0:
-                pygame.draw.rect(
-                    canvas,
-                    COLORS["markings_yellow"],
-                    (cx, road_center_y - 3 * SCALE, w, 6 * SCALE),
-                )
-            cx += dash_len + gap_len
-
-        # Cars
-        for car in sim.cars:
-            if not show_human_cars and isinstance(car, HumanVehicle):
-                continue
-            # Proportional mapping
-            # car.position is distance from start (0)
-            front_x = road_left + car.position * px_per_m
-            back_x = road_left + (car.position - car.length) * px_per_m
-
-            # Car visual width
-            car_w_px = abs(front_x - back_x)
-
-            # If car is extremely small, enforce min width?
-            # User wants "proportional".
-            # If road is 10km and car is 5m, car is 1/2000 of width. On 2000px screen, that's 1px.
-            # So cars will be tiny on long roads. That is physically correct.
-            # But let's enforce a minimum 4px so it's visible as a speck.
-            car_w_px = max(4 * SCALE, car_w_px)
-
-            car_x = min(front_x, back_x)
-
-            # Lane
-            lane_offset = car.lane * lane_h_px
-            car_h_px = lane_h_px * 0.55
-            car_y = road_top + lane_offset + (lane_h_px - car_h_px) / 2
-
-            color = COLORS["cars"][car.id % len(COLORS["cars"])]
-
-            _draw_car_sprite(canvas, car_x, car_y, car_w_px, car_h_px, color, car.id)
-
-            # ID in white circle on car roof (integer id)
-            num = car.id
-            circle_radius = 10 * SCALE
-            circle_cx = car_x + car_w_px / 2
-            circle_cy = car_y + car_h_px / 2
-            pygame.draw.circle(
-                canvas,
-                (255, 255, 255),
-                (int(circle_cx), int(circle_cy)),
-                int(circle_radius),
-            )
-            # pygame.draw.circle(
-            #     canvas,
-            #     COLORS["text"],
-            #     (int(circle_cx), int(circle_cy)),
-            #     int(circle_radius),
-            #     2,
-            # )
-            num_lbl = font_label.render(str(num), True, COLORS["text"])
-            canvas.blit(
-                num_lbl,
-                (
-                    circle_cx - num_lbl.get_width() / 2,
-                    circle_cy - num_lbl.get_height() / 2,
-                ),
-            )
-
-        # UI Overlay (Time)
-        time_str = f"{t:.1f}s"
-        pill_w, pill_h = 140 * SCALE, 60 * SCALE
-        pill_x, pill_y = 30 * SCALE, 30 * SCALE
-        _draw_rounded_rect(
-            canvas, (pill_x, pill_y, pill_w, pill_h), COLORS["ui_bg"], 1.0
-        )
-
-        pygame.draw.circle(
-            canvas,
-            COLORS["text"],
-            (pill_x + 30 * SCALE, pill_y + 30 * SCALE),
-            12 * SCALE,
-            3 * SCALE,
-        )
-        pygame.draw.line(
-            canvas,
-            COLORS["text"],
-            (pill_x + 30 * SCALE, pill_y + 30 * SCALE),
-            (pill_x + 30 * SCALE, pill_y + 18 * SCALE),
-            2 * SCALE,
-        )
-        pygame.draw.line(
-            canvas,
-            COLORS["text"],
-            (pill_x + 30 * SCALE, pill_y + 30 * SCALE),
-            (pill_x + 38 * SCALE, pill_y + 30 * SCALE),
-            2 * SCALE,
-        )
-
-        ts = font_ui.render(time_str, True, COLORS["text"])
-        canvas.blit(ts, (pill_x + 60 * SCALE, pill_y + (pill_h - ts.get_height()) // 2))
-
-        # Controls hint (bottom-left)
-        hint = font_label.render(
-            "Space: Pause | R: Restart | Esc: Quit", True, COLORS["text"]
-        )
-        canvas.blit(hint, (30 * SCALE, RENDER_H - 25 * SCALE))
-
-        # Paused overlay
-        if paused:
-            pause_txt = font_alert.render("PAUSED", True, COLORS["text"])
-            pr = pause_txt.get_rect(center=(RENDER_W // 2, RENDER_H // 2))
-            canvas.blit(pause_txt, pr)
-
-        # Collision indicator (top-right, red)
-        if collision_count > 0:
-            collision_txt = font_ui.render(
-                "Collision"
-                if collision_count == 1
-                else "Collision (%d)" % collision_count,
-                True,
-                (200, 0, 0),
-            )
-            cr = collision_txt.get_rect(topright=(RENDER_W - 20 * SCALE, 20 * SCALE))
-            canvas.blit(collision_txt, cr)
-
-        # --- Scale down and Blit to Window ---
-        frame = pygame.transform.smoothscale(canvas, (WINDOW_W, WINDOW_H))
-        window.blit(frame, (0, 0))
-
+        draw_labels(screen, road_left, road_top, road_length_px, road_height_px)
+        draw_cars(screen, active_cars, road_left, road_top, lane_h_px, scale)
+        draw_ui(screen, started, paused)
         pygame.display.flip()
-        clock.tick(FPS)
 
     pygame.quit()
 
 
 if __name__ == "__main__":
-    run_visualizer()
+    run()

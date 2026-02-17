@@ -7,7 +7,14 @@ Public API:
   - get_scenario, list_scenarios, DEFAULT_SCENARIO
 """
 
-from simulation.objects import Vehicle, HumanVehicle, AutonomousVehicle, Road
+from simulation.objects import (
+    Vehicle,
+    HumanVehicle,
+    AutonomousVehicle,
+    Road,
+    HumanDriverConfig,
+    DEFAULT_HUMAN_CONFIG,
+)
 from simulation.engine import CarsOnRoad
 from simulation.scenario import (
     get_scenario,
@@ -21,6 +28,8 @@ __all__ = [
     "AutonomousVehicle",
     "Road",
     "CarsOnRoad",
+    "HumanDriverConfig",
+    "DEFAULT_HUMAN_CONFIG",
     "get_scenario",
     "list_scenarios",
     "DEFAULT_SCENARIO",

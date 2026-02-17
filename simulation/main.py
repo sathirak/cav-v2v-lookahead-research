@@ -35,7 +35,7 @@ def main(
 
     for _ in range(steps):
         update_controls(sim, t)
-        had_collision = sim.step(dt)
+        had_collision = sim.step(dt, t)
         t += dt
         if had_collision:
             print("Collision!")

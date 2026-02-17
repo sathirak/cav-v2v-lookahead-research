@@ -196,7 +196,7 @@ def run_visualizer(
         # Step (only when not paused; collisions are resolved so cars stack)
         if not paused:
             update_controls(sim, t)
-            if sim.step(dt):
+            if sim.step(dt, t):
                 collision_count += 1
             t += dt
 

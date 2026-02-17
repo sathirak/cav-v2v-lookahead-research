@@ -1,17 +1,19 @@
-from simulation.car import Car
+from simulation.cars.human_car import HumanCar
+from simulation.cars.autonomous_car import AutonomousCar
 
-# Same lane: fast car behind will catch and collide with slow car ahead
-lead_car = Car(60, 0, speed=25, color=0)
-chase_car = Car(0, 0, speed=80, color=2)
+human_1 = HumanCar(0, 0, speed=40, acceleration=5, max_speed=60)
+autonomous_1 = AutonomousCar(50, 1, speed=30, acceleration=0, max_speed=50)
 
 
 def setup(sim, t):
     sim.road(length=200, lanes=2)
     if t < 0.05:
-        sim.add_car(lead_car)
-        sim.add_car(chase_car)
+        sim.add_car(human_1)
+        sim.add_car(autonomous_1)
 
 
 def reset():
-    lead_car.position = 60
-    chase_car.position = 0
+    human_1.position = 0
+    human_1.speed = 40
+    autonomous_1.position = 50
+    autonomous_1.speed = 30

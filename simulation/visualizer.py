@@ -115,7 +115,7 @@ def run():
     screen = pygame.display.set_mode(
         (config.WINDOW_WIDTH, config.WINDOW_HEIGHT), pygame.RESIZABLE
     )
-    pygame.display.set_caption("Road Simulation — CAV V2V Lookahead")
+    pygame.display.set_caption("CAV V2V Lookahead")
     clock = pygame.time.Clock()
 
     def reset():

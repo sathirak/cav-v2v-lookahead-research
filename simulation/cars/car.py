@@ -2,12 +2,14 @@ import config
 
 
 class Car:
-    def __init__(self, initial_position, lane, speed=80.0, color=0, length=None):
+    def __init__(self, initial_position, lane, speed=80.0, color=0, length=None, acceleration=0.0, max_speed=None):
         self.position = initial_position
         self.lane = lane
         self.speed = speed
         self.color = color
         self.length = length if length is not None else config.CAR_LENGTH_UNITS
+        self.acceleration = acceleration
+        self.max_speed = max_speed
 
     @property
     def back(self):
@@ -19,6 +21,10 @@ class Car:
 
     def update(self, dt, road_length, others=None):
         others = others or []
+        self.speed = self.speed + self.acceleration * dt
+        if self.max_speed is not None:
+            self.speed = min(self.max_speed, self.speed)
+        self.speed = max(0.0, self.speed)
         new_pos = self.position + self.speed * dt
         max_pos = road_length - self.length / 2
         for other in others:

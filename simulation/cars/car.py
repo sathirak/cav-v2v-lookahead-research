@@ -2,7 +2,17 @@ import config
 
 
 class Car:
-    def __init__(self, initial_position, lane, speed=80.0, color=0, length=None, acceleration=0.0, max_speed=None, time_headway=0.0):
+    def __init__(
+        self,
+        initial_position,
+        lane,
+        speed=80.0,
+        color=0,
+        length=None,
+        acceleration=0.0,
+        max_speed=None,
+        time_headway=0.0,
+    ):
         self.position = initial_position
         self.lane = lane
         self.speed = speed

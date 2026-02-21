@@ -4,11 +4,16 @@ import config
 from simulation.context import ScenarioContext
 
 
+MARGIN = 40
+
+
 def road_geometry(surface, road_length, num_lanes):
     width = surface.get_width()
     height = surface.get_height()
-    scale = config.PIXELS_PER_UNIT
     lane_w = config.LANE_WIDTH_UNITS
+    fit_width = (width - 2 * MARGIN) / road_length
+    fit_height = (height - 2 * MARGIN) / (num_lanes * lane_w)
+    scale = min(fit_width, fit_height, config.PIXELS_PER_UNIT)
     road_length_px = road_length * scale
     road_height_px = num_lanes * lane_w * scale
     road_left = (width - road_length_px) // 2

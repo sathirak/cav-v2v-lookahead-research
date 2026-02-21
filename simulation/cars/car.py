@@ -30,7 +30,7 @@ class Car:
     def front(self):
         return self.position + self.length / 2
 
-    def update(self, dt, road_length, others=None):
+    def update(self, dt, road_length, others=None, sim_time=0.0):
         others = others or []
         self.speed = self.speed + self.acceleration * dt
         if self.max_speed is not None:

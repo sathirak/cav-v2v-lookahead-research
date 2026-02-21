@@ -160,7 +160,7 @@ def run():
                     active_cars.append(car)
             sim_time += dt
             for car in active_cars:
-                car.update(dt, sim_ctx.road_length, active_cars)
+                car.update(dt, sim_ctx.road_length, active_cars, sim_time)
             active_cars = [c for c in active_cars if c.front < sim_ctx.road_length]
 
         road_left, road_top, road_length_px, road_height_px, lane_h_px, scale = (

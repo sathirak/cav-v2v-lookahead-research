@@ -4,3 +4,7 @@ from simulation.cars.car import Car
 class AutonomousCar(Car):
     def __init__(self, *args, color=2, **kwargs):
         super().__init__(*args, color=color, **kwargs)
+
+    def update(self, dt, road_length, others=None, sim_time=0.0):
+        self.acceleration = self.desired_acceleration(road_length, others)
+        super().update(dt, road_length, others, sim_time)

@@ -12,6 +12,8 @@ class Car:
         acceleration=0.0,
         max_speed=None,
         time_headway=0.0,
+        brake_deceleration=5.0,
+        follow_gain=2.0,
     ):
         self.position = initial_position
         self.lane = lane
@@ -21,6 +23,9 @@ class Car:
         self.acceleration = acceleration
         self.max_speed = max_speed
         self.time_headway = time_headway
+        self.brake_deceleration = brake_deceleration
+        self.follow_gain = follow_gain
+        self._preferred_acceleration = acceleration
 
     @property
     def back(self):
@@ -29,6 +34,30 @@ class Car:
     @property
     def front(self):
         return self.position + self.length / 2
+
+    def desired_acceleration(self, road_length, others):
+        others = others or []
+        max_a = self._preferred_acceleration if self._preferred_acceleration > 0 else 3.0
+        if self.max_speed is not None and self.speed >= self.max_speed:
+            cruise_a = 0.0
+        else:
+            cruise_a = self._preferred_acceleration
+        lead = None
+        for other in others:
+            if other is self or other.lane != self.lane:
+                continue
+            if other.position > self.position and (lead is None or other.position < lead.position):
+                lead = other
+        if lead is None:
+            return cruise_a
+        gap = lead.back - self.front
+        th = max(self.time_headway, 0.3)
+        desired_speed = min(
+            self.max_speed if self.max_speed is not None else 100.0,
+            max(0.0, (gap - self.length * 0.5) / th),
+        )
+        desired_a = (desired_speed - self.speed) * self.follow_gain
+        return max(-self.brake_deceleration, min(max_a, desired_a))
 
     def update(self, dt, road_length, others=None, sim_time=0.0):
         others = others or []
